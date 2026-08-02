@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What Building a Multi-Agent Threat-Intel System Taught Me About CISA KEV &middot; Robert Bradford</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main>
+<a class="back" href="./">&larr; back</a>
+<article>
+<h1>What Building a Multi-Agent Threat-Intel System Taught Me About CISA KEV</h1>
+<p>I spent this summer building a multi-agent cybersecurity system called CyberSentinel — a Claude-orchestrated platform where specialized subagents handle vulnerability triage, threat-intel enrichment, log anomaly detection, and incident reporting. It queries NVD, CISA KEV, AlienVault OTX, and AbuseIPDB, persists findings to SQLite, and serves a real-time dashboard. No LangChain; custom orchestration directly on the Anthropic SDK.</p>
+<p>The part I expected to be easy was the CISA Known Exploited Vulnerabilities catalog. It&rsquo;s a JSON file. You download it, you check whether a CVE is in it. That&rsquo;s the whole feature.</p>
+<p>That assumption was wrong in three specific ways, and each one taught me something about how exploitation data actually behaves in a triage pipeline.</p>
+<h2>1. KEV membership is a better priority signal than CVSS, and the ordering matters</h2>
+<p>The naive way to triage vulnerabilities is to sort by CVSS score and work down the list. Everyone starts here. It&rsquo;s wrong, and KEV is the reason.</p>
+<p>CVSS answers &ldquo;how bad would this be if someone exploited it?&rdquo; KEV answers &ldquo;is someone exploiting it?&rdquo; Those are different questions, and the second one is far more useful for deciding what to patch on Monday morning.</p>
+<p>When I wrote the triage rules for the vulnerability agent, the ordering ended up looking like this:</p>
+<ul>
+<li>KEV + internet-facing → P1, 24-hour deadline, patch immediately</li>
+<li>CVSS ≥ 9.0 → P1 unless there are documented compensating controls</li>
+<li>CVSS ≥ 7.0 <strong>and</strong> in KEV → P1</li>
+<li>CVSS ≥ 7.0 → P2, 7 days</li>
+<li>CVSS ≥ 4.0 → P3, 30 days</li>
+<li>Below 4.0 → P4, 90 days</li>
+</ul>
+<p>Notice that the first rule doesn&rsquo;t mention CVSS at all. A KEV-listed vulnerability on an internet-facing asset is a P1 whether its CVSS is 9.8 or 6.5, because the score is a hypothesis about severity and KEV membership is an observation about reality. A medium-severity bug that attackers are actively using is a bigger problem than a critical-severity bug that nobody has weaponized.</p>
+<p>Two real PAN-OS vulnerabilities make the point better than the abstraction does. <strong>CVE-2025-0111</strong> is an authenticated file-read flaw in the PAN-OS management interface. NVD scores it <strong>6.5, MEDIUM</strong>. It is in the KEV catalog, added 2025-02-20, with a federal remediation deadline of 2025-03-13 — twenty-one days. <strong>CVE-2026-0263</strong> is a buffer overflow in PAN-OS IKEv2 processing that lets an unauthenticated attacker execute arbitrary code on the firewall. NVD scores it <strong>9.8, CRITICAL</strong>. It is not in KEV.</p>
+<p>A CVSS-sorted queue puts the 9.8 first and the 6.5 twenty rows down. My rules invert that: the 6.5 is P1 with a 24-hour clock, and the 9.8 waits behind it. That looks wrong for about five seconds, and then it looks obviously right — CISA put the 6.5 on a legally binding remediation timeline because it is being exploited against real networks, and nobody has put the 9.8 on any list because as far as anyone can observe, no one is using it. Same vendor, same product, one attacker-validated and one not. Worth noting that the scoring is not unanimous: Palo Alto&rsquo;s own PSIRT rates both issues at roughly 7.1 and 7.2 under CVSS v4.0, so the wide gap here is specific to NVD&rsquo;s v3.1 scoring rather than a universal verdict. The 3.3-point CVSS gap is a statement about what an attacker <em>could</em> achieve; the KEV listing is a statement about what they <em>are</em> doing.</p>
+<p>The rules are ordered, not weighted, and that&rsquo;s deliberate. I tried a weighted scoring model first — multiply CVSS by a KEV coefficient, add an exposure term, sort descending. It produced defensible-looking numbers that were impossible to explain to a human. When someone asks &ldquo;why is this a P1,&rdquo; the answer needs to be a sentence, not a formula. Ordered rules give you that sentence for free: <em>it&rsquo;s in KEV and it&rsquo;s internet-facing.</em></p>
+<h2>2. The catalog is a feed, not a file, and your cache design is a security decision</h2>
+<p>My first implementation fetched the KEV JSON on every run. That works fine until you&rsquo;re making twenty agent calls in a session and you&rsquo;ve turned a public-good feed into your personal DDoS target.</p>
+<p>So I added caching with a TTL. Then I hit the interesting case: what happens when the fetch fails and the cache is expired?</p>
+<p>There are two defensible answers and they are not equally correct.</p>
+<p>You can fail closed — return nothing, report the data source as unavailable. This is honest. It&rsquo;s also useless, because now your triage runs with no exploitation data at all and silently downgrades every KEV vulnerability to &ldquo;just a CVSS score.&rdquo;</p>
+<p>Or you can fall back to the stale cache and say so loudly. That&rsquo;s what I ended up doing: try the network, and if it fails, load the cache <em>ignoring the TTL</em>, log a warning that the data is stale, and continue. A KEV catalog from last week is dramatically better than no KEV catalog, because the overwhelming majority of entries didn&rsquo;t change. The failure mode of stale data is missing the newest additions. The failure mode of no data is treating every actively-exploited vulnerability as theoretical.</p>
+<p>The general principle I took from this: when a data source degrades, ask what the <em>silent</em> failure looks like. Missing enrichment data usually doesn&rsquo;t announce itself — it just quietly makes your output less correct while it keeps looking exactly as confident.</p>
+<h2>3. Exploitation data has structure that a boolean throws away</h2>
+<p>The obvious API for KEV is <code>is_exploited(cve_id) -&gt; bool</code>. I wrote that. It&rsquo;s an O(1) set membership check and it&rsquo;s the function I call most.</p>
+<p>But building only that function throws away most of the catalog&rsquo;s value. Each KEV entry carries the date it was added, the vendor and product, a required remediation action, a due date, and — the field I underused for weeks — <code>knownRansomwareCampaignUse</code>.</p>
+<p>That last field turns out to be the single most useful thing in the feed for a healthcare context. &ldquo;This CVE is exploited&rdquo; and &ldquo;this CVE is exploited <em>by ransomware crews</em>&rdquo; are wildly different escalations when the asset in question supports patient care. Ransomware against a hospital isn&rsquo;t a data-confidentiality problem, it&rsquo;s a care-delivery problem: diverted ambulances, downtime procedures, delayed imaging.</p>
+<p>I ended up building three more accessors alongside the boolean:</p>
+<ul>
+<li><strong>the full entry</strong> for a CVE, so triage can cite the required action and due date rather than inventing one</li>
+<li><strong>recent additions</strong> within N days, which is how you answer &ldquo;what changed this week&rdquo; without diffing the whole catalog</li>
+<li><strong>ransomware-associated entries</strong>, filtered on that campaign-use field. That filter is narrower than you&rsquo;d expect: roughly one in five KEV entries are associated with known ransomware campaigns. Which is the point. It&rsquo;s a small, specific list of things known to be used by crews whose business model is halting operations.</li>
+</ul>
+<p>The recent-additions query is the one that changed how I think about the feed. A KEV addition is a <em>state change in the world</em> — CISA is telling you that something previously theoretical is now happening. That&rsquo;s a triggerable event, not a lookup. The same data supports both a &ldquo;is this bad&rdquo; question and a &ldquo;what just became bad&rdquo; question, and only the second one lets you get ahead of anything.</p>
+<h2>The thing I&rsquo;d tell myself at the start</h2>
+<p>I treated KEV as an enrichment field — a flag to hang off a CVE record I&rsquo;d already retrieved from NVD. Something to make the output look more complete.</p>
+<p>It&rsquo;s better understood as the priority axis, with CVSS as the tiebreaker. NVD tells you what a vulnerability <em>is</em>. KEV tells you whether it&rsquo;s <em>your problem this week</em>. Once I inverted that relationship, the triage output stopped reading like a vulnerability scanner and started reading like advice.</p>
+<p>There&rsquo;s a broader lesson in here about building with AI agents, too. The temptation with an LLM orchestrator is to hand the model everything and let it reason its way to a priority. I tried that. It produced fluent, plausible, inconsistent results — the same CVE would land P1 or P2 depending on what else was in the batch. Encoding the priority rules explicitly in the system prompt, in a fixed order, and letting the model do the <em>contextual</em> work — is this device internet-facing, does this touch patient care — was the fix. Deterministic where determinism is available; judgment where it isn&rsquo;t.</p>
+<p>Which is roughly the same lesson as the KEV one. Use the hard signal where you have a hard signal.</p>
+<hr />
+<p><em>CyberSentinel is a personal project — a multi-agent cybersecurity platform built on the Anthropic SDK with FastAPI, SSE, and SQLite. 165 passing tests, four specialized agents, seven threat-intel integrations.</em></p>
+</article>
+<footer><hr><p>&copy; 2026 Robert Bradford</p></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three ATT&CK Techniques That Explain Most Hospital Ransomware — and Why the Third One Is the Hard Part &middot; Robert Bradford</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main>
+<a class="back" href="./">&larr; back</a>
+<article>
+<h1>Three ATT&CK Techniques That Explain Most Hospital Ransomware — and Why the Third One Is the Hard Part</h1>
+<p>Healthcare ransomware coverage tends to arrive in one of two registers: breathless (&ldquo;hospitals under siege&rdquo;) or bureaucratic (&ldquo;entities should implement appropriate safeguards&rdquo;). Neither tells you what actually happens or what to do about it.</p>
+<p>The MITRE ATT&amp;CK framework is a better lens, because it forces specificity. Instead of &ldquo;ransomware attack,&rdquo; you get a sequence of named adversary behaviors, each with documented mitigations. Most hospital ransomware incidents are explainable as a short walk through three of them.</p>
+<p>Here are the three, what makes healthcare distinctive for each, and why the third one is where most defensive programs actually fail.</p>
+<h2>T1190 — Exploit Public-Facing Application (Initial Access)</h2>
+<p>ATT&amp;CK describes this as exploiting a weakness in an internet-facing host to gain initial network access — a software bug, a glitch, or a misconfiguration. The listed platforms are broad: Windows, Linux, macOS, containers, IaaS, <strong>ESXi</strong>, and <strong>network devices</strong>.</p>
+<p>Those last two matter disproportionately in a hospital. ATT&amp;CK explicitly calls out adversaries exploiting exposed OpenSLP services on ESXi infrastructure and exposed VMware vCenter servers, and separately notes attackers &ldquo;specifically targeting devices that do not support robust host-based defenses&rdquo; at the edge.</p>
+<p>That&rsquo;s a precise description of a hospital&rsquo;s awkward middle layer. You cannot install an EDR agent on an infusion pump, a PACS imaging workstation running a vendor-locked OS, or a building-management controller. These devices are frequently internet-adjacent, rarely patchable on a normal cycle, and often under a support contract that voids if you touch them.</p>
+<p>The mitigations ATT&amp;CK lists for T1190 are conventional — network segmentation (M1030), exploit protection (M1050), vulnerability scanning (M1016), update software (M1051), among others. The interesting thing about that list in a clinical environment is how many of them are <em>organizationally</em> blocked rather than <em>technically</em> hard. Segmentation is achievable. Segmentation without disrupting a modality that radiology depends on at 2 a.m. is a change-management problem.</p>
+<h2>T1078 — Valid Accounts (Initial Access, Persistence, Privilege Escalation, Stealth)</h2>
+<p>This one spans four tactics, which is the tell. ATT&amp;CK notes adversaries may use compromised credentials to bypass access controls, reach externally available services like VPNs and remote desktop, and — critically — &ldquo;choose not to use malware or tools in conjunction with the legitimate access those credentials provide to make it harder to detect their presence.&rdquo;</p>
+<p>No malware. No tooling. Just a valid login.</p>
+<p>ATT&amp;CK also flags abuse of <strong>inactive accounts</strong> — accounts belonging to people who have left the organization — because &ldquo;the original account user will not be present to identify any anomalous activity.&rdquo;</p>
+<p>Healthcare is unusually exposed here for structural reasons that have nothing to do with security competence: high staff turnover, rotating residents and students, travel nurses on short contracts, contractors and vendor support accounts, and shared workstations in clinical areas where friction on login has genuine patient-safety costs. The identity lifecycle is genuinely harder than in a company where people are hired, badge in for four years, and leave with an exit interview.</p>
+<p>The listed mitigations include MFA (M1032), account use policies (M1036), privileged account management (M1026), and user account management (M1018). Every healthcare security team knows these. The gap is almost never awareness.</p>
+<h2>T1486 — Data Encrypted for Impact (Impact)</h2>
+<p>The payload. ATT&amp;CK describes encrypting data to interrupt availability, including encrypting &ldquo;critical system files, disk partitions, and the MBR,&rdquo; and specifically notes adversaries &ldquo;may also encrypt virtual machines hosted on ESXi or other hypervisors.&rdquo;</p>
+<p>Two details are worth pulling out.</p>
+<p>First, the worm-like propagation: ATT&amp;CK notes encryption malware often spreads using <strong>Valid Accounts (T1078)</strong>, OS Credential Dumping (T1003), and SMB/Windows Admin Shares (T1021.002). The three techniques in this article are not independent — technique two is the propagation mechanism for technique three. That&rsquo;s why credential hygiene is a ransomware-blast-radius control, not just an access control.</p>
+<p>Second, and this is the part that reframes the whole conversation: <strong>ATT&amp;CK classifies T1486 under the Impact tactic, and the impact is availability, not confidentiality.</strong></p>
+<p>That distinction is the entire difference between healthcare ransomware and most other sectors&rsquo; ransomware. A retailer whose data is encrypted has a business-continuity problem and a regulatory problem. A hospital whose data is encrypted has a <em>care-delivery</em> problem: ambulance diversion, downtime paper procedures, delayed imaging results, cancelled elective procedures, and clinicians making decisions without a chart.</p>
+<p>The regulatory apparatus around healthcare security — HIPAA, breach notification, the OCR portal — is built primarily around <em>confidentiality</em>. Ransomware attacks <em>availability</em>. A security program optimized entirely for &ldquo;was PHI disclosed&rdquo; can be fully compliant and still catastrophically unprepared for the failure mode that actually shows up.</p>
+<p>ATT&amp;CK lists exactly two mitigations for T1486: Behavior Prevention on Endpoint (M1040) and <strong>Data Backup (M1053)</strong>. Two. For the technique that shuts hospitals down.</p>
+<p>And M1053 is not &ldquo;have backups.&rdquo; The ATT&amp;CK guidance is specific: immutable, write-once-read-many storage so ransomware cannot encrypt or delete the backups themselves; encrypted at rest; stored offsite; and — the one that gets skipped — <strong>regularly tested restoration</strong>, to validate that backups are recoverable rather than merely present.</p>
+<p>An untested backup is a hypothesis. Testing it during an incident is the worst possible time to discover the hypothesis was wrong.</p>
+<h2>Why the third one is the hard part</h2>
+<p>The first two techniques are about keeping adversaries out, and they are genuinely difficult but conventionally understood. Budget flows toward them. Vendors sell products against them.</p>
+<p>The third is about what happens after prevention fails, and it demands something prevention doesn&rsquo;t: an honest institutional answer to &ldquo;how do we deliver care for 72 hours without these systems, and have we ever actually tried?&rdquo;</p>
+<p>That&rsquo;s not a security-tooling question. It&rsquo;s a clinical-operations question that happens to be triggered by a security event, and it&rsquo;s why hospital ransomware preparedness lives or dies on downtime procedures, restoration drills, and segmentation decisions made months before anything happens — not on the EDR console.</p>
+<p>The framework can only take you to the edge of that. ATT&amp;CK will tell you T1486&rsquo;s mitigation is tested, immutable, offsite backups. Whether your organization has actually restored a critical clinical system from cold storage, end to end, with a stopwatch running — that&rsquo;s the question the framework points at and can&rsquo;t answer for you.</p>
+<hr />
+<p><em>Robert Bradford writes about threat intelligence and detection engineering. All technique data in this article is from the public MITRE ATT&amp;CK framework.</em></p>
+</article>
+<footer><hr><p>&copy; 2026 Robert Bradford</p></footer>
+</main>
+</body>
+</html>
