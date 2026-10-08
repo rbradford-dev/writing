@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CyberSentinel: a multi-agent threat-intel triage tool (case study) &middot; Robert Bradford</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main>
+<a class="back" href="./">&larr; back</a>
+<article>
+<h1>CyberSentinel: a multi-agent threat-intel triage tool (case study)</h1>
+<p>Robert Bradford &middot; personal project &middot; source code not public</p>
+
+<h2>The problem</h2>
+<p>Vulnerability triage usually starts with a list of CVEs sorted by CVSS score. That ordering tells you how bad a bug could be. It says nothing about whether anyone is exploiting it right now, and checking that by hand means bouncing between several public feeds for every CVE. I wanted a tool that pulls those sources together, applies explicit priority rules, and explains why each item landed where it did.</p>
+
+<h2>Architecture</h2>
+<p>CyberSentinel is a Python application with a custom orchestrator written directly on the Anthropic SDK. I did not use LangChain.</p>
+<ul>
+<li><strong>Orchestrator and router.</strong> A query comes in, the router decides which specialist agents need to run, and the orchestrator collects their results into one answer.</li>
+<li><strong>Four specialist agents.</strong> One handles vulnerability triage, one does threat-intel enrichment, one analyzes logs for anomalies, and one writes the report. Each agent returns a structured result object, so the orchestrator never has to parse free text from another agent.</li>
+<li><strong>Public data sources.</strong> Integrations include NVD, CISA KEV, AlienVault OTX, and AbuseIPDB, plus optional enrichment clients that switch themselves off with a logged warning when no API key is set.</li>
+<li><strong>Storage.</strong> Findings persist to SQLite through a small repository layer with migrations.</li>
+<li><strong>Dashboard.</strong> FastAPI serves the UI. Agent progress streams to the browser over Server-Sent Events (SSE), and Chart.js draws the trend and severity panels. All front-end dependencies are vendored, so the dashboard makes no CDN calls at runtime.</li>
+<li><strong>Cost tracking and retries.</strong> Each query records token cost, and LLM calls retry with exponential backoff.</li>
+</ul>
+<p>Two design choices mattered most. First, the priority rules run in a fixed order, and the first match wins. A KEV-listed CVE on an internet-facing asset is P1 regardless of its CVSS score, and CVSS breaks ties further down. The model handles the contextual questions, like whether an asset is exposed. Second, when the KEV feed can&rsquo;t be fetched, the client falls back to the last cached copy and logs that the data is stale. Running with no exploitation data at all would quietly make every result less correct. I wrote about both choices in more detail at <a href="https://rbradford-dev.github.io/writing/cisa-kev-lessons.html">https://rbradford-dev.github.io/writing/cisa-kev-lessons.html</a>.</p>
+
+<h2>Mock demo</h2>
+<p>CyberSentinel has a mock mode that swaps the live LLM for a deterministic stand-in with a configurable delay. That lets me demo the whole pipeline with no API keys and no real data.</p>
+<p>In a typical demo run I load a synthetic incident log written for the demo. It describes a fictional network where an account gets brute-forced, the attacker moves laterally, data leaves the network, and a host starts beaconing to a command-and-control server. I type a question into the run terminal on the dashboard. The router sends the log to the log-analysis agent and any indicators to the threat-intel agent. Agent status updates stream into the activity panel as each step finishes. The report agent then writes an incident summary, the findings land in SQLite, and the dashboard charts update. Every host, account, and address in the log is made up.</p>
+
+<h2>Testing</h2>
+<ul>
+<li><strong>165 passing tests at the v1.0.0 milestone.</strong> That is the count I have stated publicly for the mock-mode suite at that version.</li>
+<li>Tests use pytest and cover agent handoffs, upstream API failure modes, and the dashboard&rsquo;s read endpoints. Some live-LLM tests expect a connected model and fail when the suite runs without one.</li>
+</ul>
+
+<h2>Limitations</h2>
+<ul>
+<li>The repository is private, so nobody can check this write-up against the code yet.</li>
+<li>Live-LLM tests still fail without a live model, and live mode has needed configuration fixes when I last checked.</li>
+<li>LLM output varies between runs. Putting the priority rules in a fixed order in the prompt made results much more consistent, but I have not measured triage accuracy against a labeled set of CVEs.</li>
+<li>The stale-cache fallback for KEV can miss the newest catalog additions until the feed comes back.</li>
+<li>It is a personal project. It has not been deployed as a production service.</li>
+</ul>
+<hr />
+<p><em>CyberSentinel is a personal project. Source code is not public.</em></p>
+</article>
+<footer><hr><p>&copy; 2026 Robert Bradford</p></footer>
+</main>
+</body>
+</html>
