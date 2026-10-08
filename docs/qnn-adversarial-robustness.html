@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Adversarial attacks on a quantum classifier: a small-scale reproduction &middot; Robert Bradford</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main>
+<a class="back" href="./">&larr; back</a>
+<article>
+<h1>Adversarial attacks on a quantum classifier: a small-scale reproduction</h1>
+<p>Robert Bradford &middot; undergraduate research at Miami University &middot; April 2026 write-up, unpublished</p>
+
+<h2>Context</h2>
+<p>As undergraduate research at Miami University I have been reading and running small experiments on the security of quantum machine learning. This write-up covers one of those experiments: a reproduction of the PennyLane tutorial on adversarial attacks against quantum classifiers. The tutorial is based on Wendlinger, Tscharke, and Debus (2024), &ldquo;A Comparative Analysis of Adversarial Robustness for Quantum and Classical Machine Learning Models&rdquo; (arXiv:2404.16154). It is a reproduction of their setup and makes no new research claim.</p>
+
+<h2>Research question</h2>
+<p>Can a gradient-based attack that works on classical neural networks also break a variational quantum classifier? And does a simple defense, adversarial retraining, bring the accuracy back?</p>
+
+<h2>Method</h2>
+<ul>
+<li><strong>Data.</strong> The PlusMinus dataset: 16&times;16 grayscale images of four symbols. To keep simulation time manageable I trained on 200 images and validated on 50.</li>
+<li><strong>Model.</strong> An 8-qubit circuit with 32 StronglyEntanglingLayers, built with PennyLane&rsquo;s TorchLayer inside PyTorch. Each pixel enters the circuit through a trainable rotation angle (weight &times; input + bias). The 256 pixels are repeated three times to fill the 768 gate parameters, giving 1,536 trainable parameters. The four class outputs are Pauli-Z expectation values on four of the qubits.</li>
+<li><strong>Training.</strong> Adam, learning rate 0.1, cross-entropy loss, batch size 20, 4 epochs, on PennyLane&rsquo;s <code>lightning.qubit</code> simulator.</li>
+<li><strong>Attack.</strong> Projected Gradient Descent (PGD) on the input pixels with &epsilon; = 0.1, step size 0.01, and 10 iterations. Each pixel can change by at most 0.1 on a 0 to 1 scale.</li>
+<li><strong>Defense.</strong> I generated PGD-perturbed versions of 20 training images, added them to the training set, and retrained for 2 more epochs.</li>
+</ul>
+
+<h2>Results</h2>
+<p>On clean data the model reached 100% training accuracy and 98% validation accuracy.</p>
+<p>The attack and defense numbers come from a small-scale check on <strong>4 test images</strong>. Treat them as a tutorial reproduction, not as an accuracy estimate:</p>
+<table>
+<thead>
+<tr><th>Condition</th><th>4 test images</th><th>50 validation images (clean)</th></tr>
+</thead>
+<tbody>
+<tr><td>After training</td><td>4/4 correct</td><td>98%</td></tr>
+<tr><td>Under PGD attack (&epsilon; = 0.1)</td><td>0/4 correct</td><td>not measured</td></tr>
+<tr><td>After adversarial retraining</td><td>3/4 correct</td><td>96%</td></tr>
+</tbody>
+</table>
+<p>All four attacked images were misclassified, even though each one still clearly looked like its symbol to me. After retraining, the model got three of the four attacked images right, and clean validation accuracy dropped slightly, from 98% to 96%.</p>
+<p>The qualitative result matches the original paper. A gradient attack carries over to the quantum setting with no changes, because PGD only needs gradients with respect to the input, and a differentiable quantum circuit provides them.</p>
+
+<h2>Limitations</h2>
+<ul>
+<li><strong>Four samples.</strong> Going from 4/4 to 0/4 to 3/4 shows that the attack and the defense work at all. It is far too small to estimate how robust the model is. I would not quote these as accuracy rates.</li>
+<li><strong>The retrained model saw old attacks.</strong> I tested it on the same perturbed images that were generated against the original model. I didn&rsquo;t run a fresh PGD attack against the retrained model, so the 3/4 doesn&rsquo;t measure robustness against an attacker who targets the new model. That is the first thing I would fix in a rerun.</li>
+<li><strong>Simulation only.</strong> Everything ran on a noiseless simulator on my own machine. None of it ran on quantum hardware, and I didn&rsquo;t model hardware noise.</li>
+<li><strong>Narrow setup.</strong> One dataset, one &epsilon;, one attack, and a training subset. Adversarial retraining is also known to generalize poorly to other attack strengths and to adaptive attackers. The original paper discusses stronger options such as Lipschitz regularization.</li>
+<li>At 16&times;16 the perturbations are visible to the eye, which is a property of the low resolution and says nothing about the quantum model.</li>
+</ul>
+
+<h2>What&rsquo;s next</h2>
+<p>Rerun the evaluation with fresh attacks against the retrained model on the full 200-image test set.</p>
+<hr />
+<p><em>Undergraduate research at Miami University. Reproduction of a public PennyLane tutorial; no new research claim and no publication.</em></p>
+</article>
+<footer><hr><p>&copy; 2026 Robert Bradford</p></footer>
+</main>
+</body>
+</html>
